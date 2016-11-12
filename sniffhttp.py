@@ -1,79 +1,133 @@
-#!/usr/bin/python3
+#!/usr/bin/python
 
-## TODO
-#
-# Save to file
-# Color management
-#
-##
 
-# LIBRARIES 
-import subprocess
-import sys
-import re                    # Find * in packet
-import time                    # Timestamp loggings
-from scapy.all import *
-# END LIBRARIES 
+# This is a HTTP packet sniffer, which extract credidentials and stuff
+# Run the script as sudo (sudo python sniffhttp.py) and input required options
+#
+# TODO:
+# * Implement domain filtering for ignore ads
+#   domainFilterList = ['adzerk.net', 'adwords.google.com', 'googleads.g.doubleclick.net', 'pagead2.googlesyndication.com']
+# * Dummy check on cookies
+#   Is it a useless ad cookie
+# * Save results to files
+#   Save either creds or everything to logfile
+# * Change name of variable post
+#   post variable contains both GET and POST
+# * Configure # comments on class bcolors
+#   Comments don't match printed color
+#
+# LICENSE:
+# MIT - (c) 2016 Thomas TJ (TTJ)
+#
+
+
+# LIBRARIES
+import subprocess       # Check network devices
+import sys              # Exit script
+import os               # Clear screen
+import re               # Find * in packet
+import time             # Timestamp loggings
+from scapy.all import sniff, IP, TCP, DNS, Raw      # Tools from scapy
+# END LIBRARIES
+
 
 # VARIABLES
 gcookie = ""     # Global for not printing the same cookie multiple times
 gsecret = ""    # Same for secret
+global ignore
 # END VARIABLES
 
 
+# CODE MODULE    ##############################################################
 def main_sniff(interface, pktfilter, onlycreds, hideempty, ignore):
     try:
-        if  pktfilter == "DNS" : FILTER = "udp or port 53"
-        elif pktfilter  == "FTP" : FILTER = "port 21"
-        elif pktfilter  == "ALL" : FILTER = "udp or tcp"
-        elif pktfilter  == "POP" : FILTER = "port 110"
-        elif pktfilter  == "HTTP" : FILTER = "port 80 or 8080"
-        elif pktfilter  == "MAIL" : FILTER = "port 25 or 110 or 143"
+        if pktfilter == "DNS":
+            FILTER = "udp or port 53"
+        elif pktfilter == "FTP":
+            FILTER = "port 21"
+        elif pktfilter == "ALL":
+            FILTER = "udp or tcp"
+        elif pktfilter == "POP":
+            FILTER = "port 110"
+        elif pktfilter == "HTTP":
+            FILTER = "port 80 or 8080"
+        elif pktfilter == "MAIL":
+            FILTER = "port 25 or 110 or 143"
         else:
-            printAlert(1,"Type not allow, use show options or sop and see Auxiliar help.")
+            print("Type not allow, using UDP or TCP.")
             FILTER = "udp or tcp"
             return
-        
-        print(" "+bcolors.c4+("TIME: %-*s ID:    PRO:%-*s SRC: %-*s DST: %-*s PORT: %-*s HOST:  TYPE:  PATH:" % (4, "", 3, "", 16, "", 16, "", 5, ""))+bcolors.c0)
-        while True:sniff(filter=FILTER, prn=callback, store=0, iface=interface)
+
+        print(
+            "\n "
+            + bcolors.c4
+            + ("TIME: %-*s ID:%-*sPRO:%-*sSRC: %-*s DST: %-*s PORT: %-*s HOST:  TYPE:  PATH:" % (4, "", 5, "", 3, "", 16, "", 16, "", 5, ""))
+            + bcolors.c0
+            )
+        while True:
+            sniff(filter=FILTER, prn=callback, store=0, iface=interface)
     except KeyboardInterrupt:
         sys.exit()
 
 
 def callback(pkt):
-    if pkt.dport == 53 and pkt[IP].proto == 17:
-    #if pkt.dport == 53 and pkt[DNS].opcode == 0L and pkt[IP].proto == 17:
-        printable = (
-            ' '+'['+ time.strftime("%H:%M:%S")+'] '
-            + ("%-*s" % (6, str(pkt[IP].id)))+bcolors.c13+"  DNS   "+bcolors.c0+(" SRC: %-*s DST: %s" % (16, str(pkt[IP].src), str(pkt[DNS].qd.qname).replace("b'", "").replace("'", "")))+bcolors.c0 #
+    if pkt.dport == 53 and pkt[IP].proto == 17:    # if pkt.dport == 53 and pkt[DNS].opcode == 0L and pkt[IP].proto == 17:
+        return (
+            ' ' + '[' + time.strftime("%H:%M:%S") + '] '
+            + ("%-*s" % (6, str(pkt[IP].id)))
+            + bcolors.c13
+            + "  DNS   "
+            + bcolors.c0
+            + (" SRC: %-*s DST: %s" % (16, str(pkt[IP].src), str(pkt[DNS].qd.qname).replace("b'", "").replace("'", "")))
             )
-        return printable
-    
+
     # MAIL
+    # Capturing mail credidentials
     mailuserpass = ""
     if pkt.dport == 25 or pkt.dport == 110 or pkt.dport == 143:
         if pkt[TCP].payload:
-            ftp_packet = str(pkt[TCP].payload)
+            mail_packet = str(pkt[TCP].payload)
             # Only interested in USER and PWD
             if onlycreds == "y":
-                if 'user' in ftp_packet.lower() or 'pass' in ftp_packet.lower():
-                    printable = " ["+ time.strftime("%H:%M:%S")+"] "+("%-*s" % (6, str(pkt[IP].id)))+bcolors.c11+"  POP  "+bcolors.c0+" "+("SRC: %-*s DST: %-*s" % (16, str(pkt[IP].src), 16, str(pkt[IP].dst)))+" "+"DATA:  "+bcolors.c2+str(pkt[TCP].payload).replace("\n", ".")+bcolors.c0
-                    return printable
-            
-            if 'user' in ftp_packet.lower() or 'pass' in ftp_packet.lower():
-                mailuserpass = ("DATA:  " + bcolors.c2 + str(pkt[TCP].payload).replace("\n", " "))
-            elif ftp_packet:
-                mailuserpass = ("DATA:  " + str(pkt[TCP].payload).replace("\n", " "))
+                if 'user' in mail_packet.lower() or 'pass' in mail_packet.lower():
+                    return (
+                        " [" + time.strftime("%H:%M:%S") + "] "
+                        + ("%-*s" % (6, str(pkt[IP].id)))
+                        + bcolors.c11
+                        + "  POP  "
+                        + bcolors.c0
+                        + " "
+                        + ("SRC: %-*s DST: %-*s" % (16, str(pkt[IP].src), 16, str(pkt[IP].dst)))
+                        + " "
+                        + "DATA:  "
+                        + bcolors.c2
+                        + mail_packet.replace("\n", ".")
+                        + bcolors.c0
+                        )
+
+            if 'user' in mail_packet.lower() or 'pass' in mail_packet.lower():
+                mailuserpass = ("DATA:  " + bcolors.c2 + mail_packet.replace("\n", " "))
+            elif mail_packet:
+                mailuserpass = ("DATA:  " + mail_packet.replace("\n", " "))
             else:
                 try:
                     mailuserpass = ("DATA:  " + str(pkt[Raw].load).replace("\n", " "))
                 except:
                     mailuserpass = ""
-                
-            printable = " ["+ time.strftime("%H:%M:%S")+"] "+("%-*s" % (6, str(pkt[IP].id)))+bcolors.c11+"  POP  "+bcolors.c0+" "+("SRC: %-*s DST: %-*s" % (16, str(pkt[IP].src), 16, str(pkt[IP].dst)))+" "+mailuserpass+bcolors.c0
-            return printable
-    
+
+            return (
+                " [" + time.strftime("%H:%M:%S") + "] "
+                + ("%-*s" % (6, str(pkt[IP].id)))
+                + bcolors.c11 + "  POP  " + bcolors.c0
+                + " "
+                + ("SRC: %-*s DST: %-*s" % (16, str(pkt[IP].src), 16, str(pkt[IP].dst)))
+                + " "
+                + mailuserpass
+                + bcolors.c0
+                )
+
     # FTP
+    # Capturing FTP credidentials
     userpass = ""
     if pkt.dport == 21:
         if pkt[TCP].payload:
@@ -81,25 +135,44 @@ def callback(pkt):
             # Only interested in USER and PWD
             if onlycreds == "y":
                 if 'user' in ftp_packet.lower() or 'pass' in ftp_packet.lower():
-                    printable = " ["+ time.strftime("%H:%M:%S")+"] "+("%-*s" % (6, str(pkt[IP].id)))+colors[12]+"  FTP   "+bcolors.c0+" "+("SRC: %-*s DST: %-*s" % (16, str(pkt[IP].src), 16, str(pkt[IP].dst)))+" "+"DATA:  "+bcolors.c2+str(pkt[TCP].payload).replace("\n", ".")+bcolors.c0
-                    return printable
+                    return (
+                        " [" + time.strftime("%H:%M:%S") + "] "
+                        + ("%-*s" % (6, str(pkt[IP].id)))
+                        + bcolors.c12 + "  FTP   " + bcolors.c0
+                        + " "
+                        + ("SRC: %-*s DST: %-*s" % (16, str(pkt[IP].src), 16, str(pkt[IP].dst)))
+                        + " "
+                        + "DATA:  "
+                        + bcolors.c2 + ftp_packet.replace("\n", ".") + bcolors.c0
+                        )
+
             # Want it all
             else:
                 if 'user' in ftp_packet.lower() or 'pass' in ftp_packet.lower():
-                    userpass = ("DATA: " + bcolors.c2 + str(pkt[TCP].payload).replace("\n", " "))
+                    userpass = ("DATA: " + bcolors.c2 + ftp_packet.replace("\n", " "))
                 elif ftp_packet:
-                    userpass = ("DATA: " + str(pkt[TCP].payload).replace("\n", " "))
+                    userpass = ("DATA: " + ftp_packet.replace("\n", " "))
                 else:
                     try:
-                        userpass = ("DATA: " + str(pkt[Raw].load).replace("\n", " "))
+                        userpass = ("DATA: " + ftp_packet.replace("\n", " "))
                     except:
                         userpass = ""
-                
-                printable = " ["+ time.strftime("%H:%M:%S")+"] "+("%-*s" % (6, str(pkt[IP].id)))+colors[12]+"  FTP   "+bcolors.c0+" "+("SRC: %-*s DST: %-*s" % (16, str(pkt[IP].src), 16, str(pkt[IP].dst)))+" "+userpass+bcolors.c0
-                return printable
-    
+
+                return (
+                    " [" + time.strftime("%H:%M:%S") + "] "
+                    + ("%-*s" % (6, str(pkt[IP].id)))
+                    + bcolors.c12
+                    + "  FTP   "
+                    + bcolors.c0
+                    + " "
+                    + ("SRC: %-*s DST: %-*s" % (16, str(pkt[IP].src), 16, str(pkt[IP].dst)))
+                    + " "
+                    + userpass
+                    + bcolors.c0
+                    )
+
     # HTTP
-    payload = ""
+    # Capturing HTTP credidentials
     host = ""
     username = ""
     password = ""
@@ -109,28 +182,25 @@ def callback(pkt):
     secret = ""
     csrf = ""
     raw = ""
-    payload = ""
     raw_dport = ""
     global gcookie
     global gsecret
-    if True:
-    #if pkt.dport == 80 or pkt.dport == 8080:
-        
+    if True:        # if pkt.dport == 80 or pkt.dport == 8080:
         try:
             raw = str(pkt[Raw].show)
             raw_dport = str(pkt[TCP].dport)
         except:
             raw = ""
-            
+
         if raw == "":
             return None
-           
+
         # Get username
         if 'user' in raw:
             mu = re.search('user[A-Za-z0-9%_-]*=([A-Za-z0-9%_-]+)', raw, re.IGNORECASE)
             if mu:
                 username = str(mu.group(1))
-                
+
         # Get password
         if 'pass' in raw or 'pwd' in raw:
             mp = re.search('pass[A-Za-z0-9%_-]*=([A-Za-z0-9%_-]+)', raw, re.IGNORECASE)
@@ -142,16 +212,16 @@ def callback(pkt):
                     password = str(mp.group(1))
             if password.isspace():
                 password = ""
-        
+
         # Get path
         if raw:
-            mpath = re.search('\\\\r\\\\n\\\\r\\\\n([A-Za-z0-9%\.=&_-]+)', raw) #b(.+[A-Za-z0-9%_-])\\\\r\\\\nHost:
+            mpath = re.search('\\\\r\\\\n\\\\r\\\\n([A-Za-z0-9%\.=&_-]+)', raw)
             if mpath:
                 path = "  PATH: " + str(mpath.group(1))
-        
-        # Get cookie                
+
+        # Get cookie
         if raw:
-            mcookie = re.search('Cookie:\s([A-Za-z0-9%=&_-]+)\\\\r\\\\n', raw) #b(.+[A-Za-z0-9%_-])\\\\r\\\\nHost:
+            mcookie = re.search('Cookie:\s([A-Za-z0-9%=&_-]+)\\\\r\\\\n', raw)
             if mcookie:
                 cookie = "  COOKIE: " + str(mcookie.group(1))
                 if cookie == gcookie:
@@ -159,7 +229,7 @@ def callback(pkt):
                 else:
                     gcookie = cookie
             else:
-                mcookie = re.search('Cookie:\s([A-Za-z0-9%=&_-]+);', raw) #b(.+[A-Za-z0-9%_-])\\\\r\\\\nHost:
+                mcookie = re.search('Cookie:\s([A-Za-z0-9%=&_-]+);', raw)
                 if mcookie:
                     cookie = "  COOKIE: " + str(mcookie.group(1))
                     if cookie == gcookie:
@@ -167,48 +237,50 @@ def callback(pkt):
                     else:
                         gcookie = cookie
             # Do a check for stupid cookies and ignore them
-            #if 'Gdyn' or 'gscroll' in cookie:
-            #    cookie = ""    
-            
+            # if 'Gdyn' or 'gscroll' in cookie:
+            #    cookie = ""
+
         # Get host
         if raw:
-            mhost = re.search('Host:\s([A-Za-z0-9%\.=&_-]+)\\\\r\\\\n', raw) #b(.+[A-Za-z0-9%_-])\\\\r\\\\nHost:
+            mhost = re.search('Host:\s([A-Za-z0-9%\.=&_-]+)\\\\r\\\\n', raw)
             if mhost:
                 host = "  HOST: " + str(mhost.group(1))
 
-        # Get POST
+        # Get POST / GET
         if raw:
-            mpost = re.search('(POST.*[A-Za-z0-9%_-]+).HTTP', raw) #b(.+[A-Za-z0-9%_-])\\\\r\\\\nHost:
+            mpost = re.search('(POST.*[A-Za-z0-9%_-]+).HTTP', raw)
             if mpost:
                 post = "  TYPE: " + str(mpost.group(1))
             else:
                 mpost = re.search('(GET.*[A-Za-z0-9%_-]+).HTTP', raw)
                 if mpost:
                     post = "  TYPE: " + str(mpost.group(1))
-            
+
         # Get secret
         if raw:
-            msecret = re.search('([A-Za-z0-9%=&_-]+secret[A-Za-z0-9%=&_-]+)', raw, re.IGNORECASE) #b(.+[A-Za-z0-9%_-])\\\\r\\\\nHost:
+            msecret = re.search('([A-Za-z0-9%=&_-]+secret[A-Za-z0-9%=&_-]+)', raw, re.IGNORECASE)
             if msecret:
                 secret = "  SECRET: " + str(msecret.group(1))
                 if secret == gsecret:
                     secret = ""
                 else:
                     gsecret = secret
-        
-        # Get CSRF        
+
+        # Get CSRF
         if raw:
             mcsrf = re.search('csrf[A-Za-z0-9%_-]*=([A-Za-z0-9%_-]+)', raw, re.IGNORECASE)
             if mcsrf:
                 csrf = "  CSRF: " + str(mcsrf.group(1))
-                
-        
+
         if password:
             if onlycreds != "y":
                 printablecon = (
                     '\n'
-                    + ' ' + bcolors.c3 + '['+ time.strftime("%H:%M:%S")+']' + bcolors.c0 + ' ' + bcolors.c2 + 'CREDS CATCHED:' + bcolors.c0
-                    + '\n' + " ["+ time.strftime("%H:%M:%S")+"] " + str(pkt[IP].id)
+                    + ' '
+                    + bcolors.c3 + '[' + time.strftime("%H:%M:%S") + ']' + bcolors.c0
+                    + ' '
+                    + bcolors.c2 + 'CREDS CATCHED:' + bcolors.c0
+                    + '\n' + " [" + time.strftime("%H:%M:%S") + "] " + str(pkt[IP].id)
                     + '\n\t\t  ORIGIN:   ' + str(pkt[IP].src)
                     + '\n\t\t  SERVER:   ' + str(pkt[IP].dst)
                     + '\n\t\t  PORT:     ' + raw_dport
@@ -222,52 +294,84 @@ def callback(pkt):
                     + '\n\t\t  SECRET:   ' + secret.replace("  SECRET: ", "")
                     + '\n\n'
                     )
-        
+
             # Only CREDS
             if onlycreds == "y":
                 printablecon = (
                     '\n'
-                    + ' ' + bcolors.c3 + '['+ time.strftime("%H:%M:%S")+']' + bcolors.c0 + ' ' + bcolors.c2 + "CREDS CATCHED:" + bcolors.c0
-                    + '\n ' + " ["+ time.strftime("%H:%M:%S")+"] " + str(pkt[IP].id) 
+                    + ' '
+                    + bcolors.c3 + '[' + time.strftime("%H:%M:%S") + ']' + bcolors.c0
+                    + ' '
+                    + bcolors.c2 + "CREDS CATCHED:" + bcolors.c0
+                    + '\n ' + " [" + time.strftime("%H:%M:%S") + "] " + str(pkt[IP].id)
                     + '\n'
-                    +  bcolors.c2 + '\n\t\t  ORIGIN  : ' + str(pkt[IP].src) + bcolors.c0
-                    +  bcolors.c2 + '\n\t\t  USERNAME: ' + username + bcolors.c0
-                    +  bcolors.c2 + '\n\t\t  PASSWORD: ' + password + bcolors.c0
+                    + bcolors.c2 + '\n\t\t  ORIGIN  : ' + str(pkt[IP].src) + bcolors.c0
+                    + bcolors.c2 + '\n\t\t  USERNAME: ' + username + bcolors.c0
+                    + bcolors.c2 + '\n\t\t  PASSWORD: ' + password + bcolors.c0
                     + '\n\t\t  Path:     ' + path
                     + '\n'
                     )
-                    
+
             return printablecon
-            
+
         elif cookie or secret or csrf:
-            return ' '+bcolors.c3+'['+ time.strftime("%H:%M:%S")+']'+bcolors.c0+" "+("%-*s  Other  SRC: %-*s DST: %-*s PORT: %-*s" % (6, str(pkt[IP].id),16, str(pkt[IP].src), 16, str(pkt[IP].dst), 5, raw_dport))+host+post+path+bcolors.c2+cookie+secret+csrf+bcolors.c0
-        
+            return (
+                ' '
+                + bcolors.c3 + '[' + time.strftime("%H:%M:%S") + ']' + bcolors.c0
+                + " "
+                + ("%-*s  Other  SRC: %-*s DST: %-*s PORT: %-*s" % (6, str(pkt[IP].id), 16, str(pkt[IP].src), 16, str(pkt[IP].dst), 5, raw_dport))
+                + host
+                + post
+                + path
+                + bcolors.c2
+                + cookie
+                + secret
+                + csrf
+                + bcolors.c0
+                )
+
         elif 'login' in post.lower():
-            return ' '+bcolors.c3+'['+ time.strftime("%H:%M:%S")+']'+bcolors.c0+" "+("%-*s  Other  SRC: %-*s DST: %-*s PORT: %-*s" % (6, str(pkt[IP].id),16, str(pkt[IP].src), 16, str(pkt[IP].dst), 5, raw_dport))+host+bcolors.c2+post+path+bcolors.c0
-        
+            return (
+                ' '
+                + bcolors.c3 + '[' + time.strftime("%H:%M:%S") + ']' + bcolors.c0
+                + " "
+                + ("%-*s  Other  SRC: %-*s DST: %-*s PORT: %-*s" % (6, str(pkt[IP].id), 16, str(pkt[IP].src), 16, str(pkt[IP].dst), 5, raw_dport))
+                + host
+                + bcolors.c2
+                + post
+                + path
+                + bcolors.c0
+                )
+
         else:
             if ignore == "y":
                 # Create for loop checking each user input ignore files instead of static
-                #if re.search('(\.jpg)', post, re.IGNORECASE) is not None or re.search('(\.js)', post, re.IGNORECASE) is not None or re.search('(\.css)', post, re.IGNORECASE) is not None:
                 if re.search('(\.jpg|\.js|\.css|\.jpeg|\.svg|\.png)', post, re.IGNORECASE) is not None:
-                    return None 
-            
+                    return None
+
             if hideempty == "y":
-                #if raw != "" or payload != "":
                 if post != "":
-                    return bcolors.c9+" ["+ time.strftime("%H:%M:%S")+"] "+("%-*s  Other  SRC: %-*s DST: %-*s PORT: %-*s" % (6, str(pkt[IP].id),16, str(pkt[IP].src), 16, str(pkt[IP].dst), 5, raw_dport))+host+post+path
+                    return (
+                        bcolors.c9 + " [" + time.strftime("%H:%M:%S") + "] "
+                        + ("%-*s  Other  SRC: %-*s DST: %-*s PORT: %-*s" % (6, str(pkt[IP].id), 16, str(pkt[IP].src), 16, str(pkt[IP].dst), 5, raw_dport))
+                        + host
+                        + post
+                        + path
+                        )
                 else:
                     return None
             else:
-                return bcolors.c9+" ["+ time.strftime("%H:%M:%S")+"] "+("%-*s  Other  SRC: %-*s DST: %-*s PORT: %-*s" % (6, str(pkt[IP].id), 16, str(pkt[IP].src), 16, str(pkt[IP].dst), 5, raw_dport))+host+post+path
-        
-        
-    # Implement domain filtering for ignore ads    
-    #domainFilterList = ['adzerk.net', 'adwords.google.com', 'googleads.g.doubleclick.net', 'pagead2.googlesyndication.com']
-            
-    #except:n=None
-    
-    
+                return (
+                    bcolors.c9 + " [" + time.strftime("%H:%M:%S") + "] "
+                    + ("%-*s  Other  SRC: %-*s DST: %-*s PORT: %-*s" % (6, str(pkt[IP].id), 16, str(pkt[IP].src), 16, str(pkt[IP].dst), 5, raw_dport))
+                    + host
+                    + post
+                    + path
+                    )
+# END CODE MODULE #############################################################
+
+
+# START COLOR CLASS ###########################################################
 class bcolors:
     c0 = '\033[0m'   # 0}  WHITE
     c1 = '\033[31m'  # 1}  RED
@@ -283,10 +387,11 @@ class bcolors:
     c11 = '\033[41m'  # 11} BACKGROUND RED
     c12 = '\033[42m'  # 12} BACKGROUND GREEN
     c13 = '\033[43m'  # 13} BACKGROUND YELLOW
+# END COLOR CLASS #############################################################
 
 
-## START HERE
-os.system('clear')        # For windows change to 'cls'
+# START SCRIPT ################################################################
+os.system('clear')        # For Windows change to 'cls'
 print("\n")
 print("  | -> Author       : Thomas TJ 2016 (TTJ)")
 print("  | -> Version      : 1.0")
@@ -306,17 +411,17 @@ print(
     + "\n" + bcolors.c0
     )
 print("   Possible interfaces:")
-    
-Interfaces=subprocess.getoutput("netstat -i | awk '{print $1}'")
-Interfaces=str(Interfaces)
-Interfaces=Interfaces.replace("\n",",")
-Interfaces=Interfaces.replace("Kernel,Iface,","")
-Interfaces=Interfaces.split(",")
+
+Interfaces = subprocess.getoutput("netstat -i | awk '{print $1}'")
+Interfaces = str(Interfaces)
+Interfaces = Interfaces.replace("\n", ",")
+Interfaces = Interfaces.replace("Kernel,Iface,", "")
+Interfaces = Interfaces.split(",")
 if len(Interfaces) >= 0:
     print("   " + str(Interfaces))
 else:
     print("   -> No interfaces")
-    
+
 print("\n\n")
 
 # @type  interface: str
@@ -346,14 +451,14 @@ onlycreds = input(bcolors.c0 + "  Only print credidentials (y/N): " + bcolors.c4
 if onlycreds.lower() not in ('y', 'n'):
     print(bcolors.c2 + "  - Wrong input - only 'y' and 'n' allowed. Using 'n'")
     onlycreds = 'n'
-    
+
 # @type  hideempty: str
 # @param hideempty: Hide "empty" packets. Generate alot of noise.
 hideempty = input(bcolors.c0 + "  Hide empty packets (Y/n): " + bcolors.c4)
 if hideempty.lower() not in ('y', 'n'):
     print(bcolors.c2 + "  - Wrong input - only 'y' and 'n' allowed. Using 'y'")
     hideempty = 'y'
-    
+
 # @type  ignore: str
 # @param ignore: Ignore packets which contain .jpeg, .jpg, .png, .js, etc..
 ignore = input(bcolors.c0 + "  Hide js, jpg, etc. (Y/n): " + bcolors.c4)
@@ -361,6 +466,5 @@ if ignore.lower() not in ('y', 'n'):
     print(bcolors.c2 + "  - Wrong input - only 'y' and 'n' allowed. Using 'y'")
     ignore = 'y'
 
-main_sniff(interface, pktfilter, onlycreds, hideempty, ignore)
-    
 
+main_sniff(interface, pktfilter, onlycreds, hideempty, ignore)
