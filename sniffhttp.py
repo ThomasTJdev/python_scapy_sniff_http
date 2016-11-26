@@ -314,6 +314,9 @@ def callback(pkt):
 
             return printablecon
 
+        elif onlycreds == "yes":
+            return None
+
         elif cookie or secret or csrf:
             return (
                 ' '
