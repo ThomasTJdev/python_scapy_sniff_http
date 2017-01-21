@@ -22,4 +22,4 @@ MIT, 2016 Thomas TJ (TTJ)
 Other
 -----
 
-Want to try it with Katana? Check the module here [ThomasTJ Gitlab](www.gitlab.com/u/ThomasTJ)
+Want to try it with WMDframework? Check the module here [WMD](https://github.com/ThomasTJdev/WMD)
